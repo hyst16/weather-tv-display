@@ -6,9 +6,10 @@ export const offices = {
     timezone: "America/Chicago",
     coordinates: { latitude: 41.2528, longitude: -97.1301 },
     nearbyObservationStation: "KOLU",
-    radarViewport: { west: -105.5, east: -93.5, south: 39.3, north: 44.4 },
-    radarLabel: "Nebraska regional composite",
+    radarViewport: { west: -101.0, east: -94.2, south: 39.85, north: 42.8 },
+    radarLabel: "Eastern Nebraska composite",
     nwrOffice: "Omaha / Valley",
+    hourlyForecastUrl: "https://api.weather.gov/gridpoints/OAX/42,60/forecast/hourly",
     locationNote: "Live observation from Columbus Municipal Airport (KOLU), the nearest reliable NWS station."
   }
 };
