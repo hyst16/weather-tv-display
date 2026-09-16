@@ -10,6 +10,10 @@ const DATA_REFRESH_MS = 10 * 60 * 1000;
 const RADAR_BOUNDS = { west: -126, east: -66, south: 24, north: 50 };
 const BOUNDARY_DATA_URL = `${import.meta.env.BASE_URL}boundaries-nebraska-region.json`;
 const $ = (selector) => document.querySelector(selector);
+const FORECAST_ROTATION_MS = 20 * 1000;
+let weatherSources;
+let forecastView = "hourly";
+let forecastRotationTimer;
 const NEBRASKA_CITIES = [
   ["Omaha", -95.9345, 41.2565, 486051], ["Lincoln", -96.7026, 40.8136, 291082],
   ["Bellevue", -95.8941, 41.1544, 64091], ["Grand Island", -98.3420, 40.9264, 51820],
@@ -38,7 +42,7 @@ $("#app").innerHTML = `
           <div><span>WIND</span><strong id="wind">--</strong></div>
           <div><span>HUMIDITY</span><strong id="humidity">--</strong></div>
         </div>
-        <p id="observation-note" class="source-note">${office.locationNote}</p>
+        <p id="observation-note" class="source-note">Locating the nearest official observation station…</p>
       </section>
       <section class="radar panel" aria-label="Animated precipitation radar">
         <div class="radar-heading">
@@ -55,9 +59,9 @@ $("#app").innerHTML = `
         <div class="radar-footer"><span id="frame-time">Awaiting radar imagery</span><span>NOAA NEXRAD mosaic via Iowa Environmental Mesonet</span></div>
       </section>
       <aside class="forecast panel" aria-label="Forecast">
-        <div class="forecast-heading"><div class="panel-label">NEXT HOURS</div><div id="forecast-status" class="data-status loading">Loading</div></div>
-        <div id="hourly-slots" class="hourly-slots" aria-live="polite"><div class="hourly-loading">Loading NWS hourly forecast…</div></div>
-        <div class="forecast-footer"><span>NWS ${office.nwrOffice}</span><span id="forecast-updated">LIVE DATA</span></div>
+        <div class="forecast-heading"><div id="forecast-title" class="panel-label">NEXT HOURS</div><div id="forecast-status" class="data-status loading">Loading</div></div>
+        <div id="forecast-slots" class="forecast-slots" aria-live="polite"><div class="forecast-loading">Loading David City point forecast…</div></div>
+        <div class="forecast-footer"><span>OFFICIAL DAVID CITY POINT FORECAST</span><span id="forecast-updated">ISSUED BY NWS OMAHA/VALLEY</span></div>
       </aside>
     </section>
     <footer class="footer"><span id="system-status">DATA: CONNECTING</span><span>WEATHER AWARENESS DISPLAY — CHECK OFFICIAL ALERTS</span><span id="last-refresh">--</span></footer>
@@ -97,11 +101,34 @@ async function fetchJson(url) {
   return response.json();
 }
 
+function miles(meters) {
+  return `${Math.round(meters / 1609.344)} mi`;
+}
+
+async function initializeWeatherSources() {
+  const pointUrl = `${NWS_HOST}/points/${office.coordinates.latitude},${office.coordinates.longitude}`;
+  const point = await fetchJson(pointUrl);
+  const props = point.properties;
+  const stations = await fetchJson(props.observationStations);
+  const nearestStation = stations.features
+    .filter((station) => station.properties?.stationIdentifier)
+    .sort((a, b) => a.properties.distance.value - b.properties.distance.value)[0];
+  if (!nearestStation) throw new Error("NWS point returned no observation stations");
+  weatherSources = {
+    daily: props.forecast,
+    hourly: props.forecastHourly,
+    station: nearestStation.properties,
+    observation: `${NWS_HOST}/stations/${nearestStation.properties.stationIdentifier}/observations/latest`
+  };
+  $("#observation-note").textContent = `Current observation: ${weatherSources.station.name} (${weatherSources.station.stationIdentifier}), ${miles(weatherSources.station.distance.value)} from David City.`;
+}
+
 async function loadWeather() {
   try {
-    const [observation, hourlyForecast] = await Promise.all([
-      fetchJson(`${NWS_HOST}/stations/${office.nearbyObservationStation}/observations/latest`),
-      fetchJson(office.hourlyForecastUrl)
+    const [observation, hourlyForecast, dailyForecast] = await Promise.all([
+      fetchJson(weatherSources.observation),
+      fetchJson(weatherSources.hourly),
+      fetchJson(weatherSources.daily)
     ]);
     const props = observation.properties;
     const fahrenheit = celsiusToFahrenheit(props.temperature?.value);
@@ -109,14 +136,18 @@ async function loadWeather() {
     $("#condition").textContent = props.textDescription || "Conditions unavailable";
     $("#wind").textContent = formatWind(props.windSpeed?.value, props.windDirection?.value);
     $("#humidity").textContent = props.relativeHumidity?.value === null ? "--" : `${Math.round(props.relativeHumidity.value)}%`;
-    $("#observation-note").textContent = `${office.locationNote} Observed ${new Date(props.timestamp).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: office.timezone })} CT.`;
+    $("#observation-note").textContent = `Current observation: ${weatherSources.station.name} (${weatherSources.station.stationIdentifier}), ${miles(weatherSources.station.distance.value)} from David City. Observed ${new Date(props.timestamp).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: office.timezone })} CT.`;
 
     const periods = hourlyForecast.properties.periods?.slice(0, 4);
     if (periods?.length) {
-      renderHourlyForecast(periods);
+      cachedHourlyPeriods = periods;
+      cachedDailyPeriods = dailyForecast.properties.periods || [];
+      forecastView = "hourly";
+      renderForecastView(cachedHourlyPeriods, cachedDailyPeriods);
+      startForecastRotation();
       $("#forecast-status").textContent = "Live";
       $("#forecast-status").className = "data-status live";
-      $("#forecast-updated").textContent = `UPDATED ${new Date(hourlyForecast.properties.updateTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: office.timezone })} CT`;
+      $("#forecast-updated").textContent = `ISSUED ${new Date(hourlyForecast.properties.updateTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: office.timezone })} CT · NWS OMAHA/VALLEY`;
     } else {
       throw new Error("NWS hourly forecast contained no periods");
     }
@@ -124,7 +155,7 @@ async function loadWeather() {
     $("#last-refresh").textContent = `UPDATED ${stamp()} CT`;
   } catch (error) {
     $("#condition").textContent = "NOAA conditions unavailable";
-    $("#hourly-slots").innerHTML = `<div class="hourly-loading error-copy">Hourly forecast unavailable. Retrying automatically.</div>`;
+    $("#forecast-slots").innerHTML = `<div class="forecast-loading error-copy">David City point forecast unavailable. Retrying automatically.</div>`;
     $("#forecast-status").textContent = "Retrying";
     $("#forecast-status").className = "data-status error";
     $("#forecast-updated").textContent = "NWS RETRYING";
@@ -144,16 +175,50 @@ function weatherSymbol(shortForecast) {
 }
 
 function renderHourlyForecast(periods) {
-  $("#hourly-slots").innerHTML = periods.map((period) => {
+  return periods.slice(0, 3).map((period) => {
     const time = new Intl.DateTimeFormat("en-US", { timeZone: office.timezone, hour: "numeric", hour12: true }).format(new Date(period.startTime));
     const precipitation = period.probabilityOfPrecipitation?.value;
     const chance = precipitation === null || precipitation === undefined ? "--" : `${precipitation}%`;
-    return `<article class="hourly-slot">
+    return `<article class="forecast-slot hourly-slot">
       <time>${time}</time><span class="weather-symbol" aria-hidden="true">${weatherSymbol(period.shortForecast)}</span>
       <strong>${period.temperature}°</strong><span class="hourly-condition">${period.shortForecast}</span>
       <span class="hourly-detail">RAIN ${chance} · ${period.windDirection} ${period.windSpeed}</span>
     </article>`;
   }).join("");
+}
+
+function renderDailyForecast(periods) {
+  const days = periods.filter((period) => period.isDaytime).slice(0, 4);
+  return days.map((period) => {
+    const day = new Intl.DateTimeFormat("en-US", { timeZone: office.timezone, weekday: "short" }).format(new Date(period.startTime)).toUpperCase();
+    const precipitation = period.probabilityOfPrecipitation?.value;
+    const chance = precipitation === null || precipitation === undefined ? "--" : `${precipitation}%`;
+    return `<article class="forecast-slot daily-slot">
+      <time>${day}</time><span class="weather-symbol" aria-hidden="true">${weatherSymbol(period.shortForecast)}</span>
+      <strong>${period.temperature}°</strong><span class="hourly-condition">${period.shortForecast}</span>
+      <span class="hourly-detail">PRECIP ${chance} · ${period.windDirection} ${period.windSpeed}</span>
+    </article>`;
+  }).join("");
+}
+
+function renderForecastView(hourlyPeriods, dailyPeriods) {
+  $("#forecast-title").textContent = forecastView === "hourly" ? "NEXT HOURS" : "NEXT DAYS";
+  $("#forecast-slots").classList.remove("forecast-fade");
+  void $("#forecast-slots").offsetWidth;
+  $("#forecast-slots").classList.add("forecast-fade");
+  $("#forecast-slots").innerHTML = forecastView === "hourly" ? renderHourlyForecast(hourlyPeriods) : renderDailyForecast(dailyPeriods);
+}
+
+let cachedHourlyPeriods = [];
+let cachedDailyPeriods = [];
+
+function startForecastRotation() {
+  clearInterval(forecastRotationTimer);
+  forecastRotationTimer = setInterval(() => {
+    if (!cachedHourlyPeriods.length || !cachedDailyPeriods.length) return;
+    forecastView = forecastView === "hourly" ? "daily" : "hourly";
+    renderForecastView(cachedHourlyPeriods, cachedDailyPeriods);
+  }, FORECAST_ROTATION_MS);
 }
 
 function radarUrl(date) {
@@ -316,7 +381,16 @@ fitSlideToViewport();
 window.addEventListener("resize", fitSlideToViewport, { passive: true });
 updateClock();
 setInterval(updateClock, 1000);
-loadWeather();
+initializeWeatherSources().then(loadWeather).catch((error) => {
+  $("#condition").textContent = "NOAA sources unavailable";
+  $("#forecast-slots").innerHTML = `<div class="forecast-loading error-copy">David City weather sources unavailable. Retrying automatically.</div>`;
+  $("#forecast-status").textContent = "Retrying";
+  $("#forecast-status").className = "data-status error";
+  console.warn("NWS source discovery failed:", error);
+});
 loadRadar();
-setInterval(loadWeather, DATA_REFRESH_MS);
+setInterval(() => {
+  if (weatherSources) loadWeather();
+  else initializeWeatherSources().then(loadWeather).catch((error) => console.warn("NWS source discovery retry failed:", error));
+}, DATA_REFRESH_MS);
 setInterval(loadRadar, RADAR_REFRESH_MS);
