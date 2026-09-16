@@ -1,18 +1,8 @@
-export const offices = {
-  "david-city-ne": {
-    slug: "david-city-ne",
-    name: "David City",
-    state: "Nebraska",
-    timezone: "America/Chicago",
-    coordinates: { latitude: 41.2528, longitude: -97.1301 },
-    radarViewport: { west: -101.0, east: -94.2, south: 39.85, north: 42.8 },
-    radarLabel: "Eastern Nebraska composite",
-    nwrOffice: "Omaha / Valley",
-    locationNote: "Live observation from Columbus Municipal Airport (KOLU), the nearest reliable NWS station."
-  }
-};
+import offices from "./offices.json";
+
+export { offices };
 
 export function getOffice() {
   const segment = location.pathname.split("/").filter(Boolean).pop();
-  return offices[segment] || offices["david-city-ne"];
+  return offices[segment];
 }
