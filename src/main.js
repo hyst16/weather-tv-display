@@ -21,11 +21,11 @@ const NEBRASKA_CITIES = [
   ["Beatrice", -96.7461, 40.2681, 12401], ["Lexington", -99.7418, 40.7808, 10290]
 ];
 
-document.title = `${office.name} Weather | PosterBooking`;
+document.title = `${office.name} Weather Display`;
 $("#app").innerHTML = `
   <main class="slide" aria-label="${office.name} weather display">
     <header class="masthead">
-      <div class="brand"><span class="brand-mark">PB</span><span>POSTERBOOKING<span class="dot">.UK</span></span></div>
+      <div class="display-identity"><span class="identity-mark"></span><span>REGIONAL WEATHER</span></div>
       <div class="headline"><span class="eyebrow">LOCAL WEATHER</span><strong>${office.name}, ${office.state}</strong></div>
       <time id="clock" class="clock"></time>
     </header>
@@ -55,11 +55,9 @@ $("#app").innerHTML = `
         <div class="radar-footer"><span id="frame-time">Awaiting radar imagery</span><span>NOAA NEXRAD mosaic via Iowa Environmental Mesonet</span></div>
       </section>
       <aside class="forecast panel" aria-label="Forecast">
-        <div class="panel-label">OUTLOOK</div>
-        <div id="forecast-period" class="forecast-period">Loading forecast…</div>
-        <div id="forecast-temp" class="forecast-temp">--</div>
-        <p id="forecast-detail">National Weather Service forecast data is loading.</p>
-        <div class="forecast-footer"><span>NWS ${office.nwrOffice}</span><span id="forecast-updated"></span></div>
+        <div class="forecast-heading"><div class="panel-label">NEXT HOURS</div><div id="forecast-status" class="data-status loading">Loading</div></div>
+        <div id="hourly-slots" class="hourly-slots" aria-live="polite"><div class="hourly-loading">Loading NWS hourly forecast…</div></div>
+        <div class="forecast-footer"><span>NWS ${office.nwrOffice}</span><span id="forecast-updated">LIVE DATA</span></div>
       </aside>
     </section>
     <footer class="footer"><span id="system-status">DATA: CONNECTING</span><span>WEATHER AWARENESS DISPLAY — CHECK OFFICIAL ALERTS</span><span id="last-refresh">--</span></footer>
@@ -101,9 +99,9 @@ async function fetchJson(url) {
 
 async function loadWeather() {
   try {
-    const [observation, forecast] = await Promise.all([
+    const [observation, hourlyForecast] = await Promise.all([
       fetchJson(`${NWS_HOST}/stations/${office.nearbyObservationStation}/observations/latest`),
-      fetchJson(`${NWS_HOST}/gridpoints/OAX/42,60/forecast`)
+      fetchJson(office.hourlyForecastUrl)
     ]);
     const props = observation.properties;
     const fahrenheit = celsiusToFahrenheit(props.temperature?.value);
@@ -113,22 +111,49 @@ async function loadWeather() {
     $("#humidity").textContent = props.relativeHumidity?.value === null ? "--" : `${Math.round(props.relativeHumidity.value)}%`;
     $("#observation-note").textContent = `${office.locationNote} Observed ${new Date(props.timestamp).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: office.timezone })} CT.`;
 
-    const period = forecast.properties.periods?.[0];
-    if (period) {
-      $("#forecast-period").textContent = period.name.toUpperCase();
-      $("#forecast-temp").textContent = `${period.temperature}°`;
-      $("#forecast-detail").textContent = period.detailedForecast;
-      $("#forecast-updated").textContent = "NOAA / NWS";
+    const periods = hourlyForecast.properties.periods?.slice(0, 4);
+    if (periods?.length) {
+      renderHourlyForecast(periods);
+      $("#forecast-status").textContent = "Live";
+      $("#forecast-status").className = "data-status live";
+      $("#forecast-updated").textContent = `UPDATED ${new Date(hourlyForecast.properties.updateTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: office.timezone })} CT`;
+    } else {
+      throw new Error("NWS hourly forecast contained no periods");
     }
     $("#system-status").textContent = "DATA: LIVE NOAA / NWS";
     $("#last-refresh").textContent = `UPDATED ${stamp()} CT`;
   } catch (error) {
     $("#condition").textContent = "NOAA conditions unavailable";
-    $("#forecast-period").textContent = "FORECAST UNAVAILABLE";
-    $("#forecast-detail").textContent = "The National Weather Service request did not complete. This display will retry automatically.";
+    $("#hourly-slots").innerHTML = `<div class="hourly-loading error-copy">Hourly forecast unavailable. Retrying automatically.</div>`;
+    $("#forecast-status").textContent = "Retrying";
+    $("#forecast-status").className = "data-status error";
+    $("#forecast-updated").textContent = "NWS RETRYING";
     $("#system-status").textContent = "DATA: NWS RETRYING";
     console.warn("NWS weather request failed:", error);
   }
+}
+
+function weatherSymbol(shortForecast) {
+  const condition = shortForecast.toLowerCase();
+  if (condition.includes("thunder")) return "⚡";
+  if (condition.includes("snow") || condition.includes("flurr")) return "❄";
+  if (condition.includes("rain") || condition.includes("shower") || condition.includes("drizzle")) return "☂";
+  if (condition.includes("fog") || condition.includes("haze")) return "≋";
+  if (condition.includes("cloud")) return condition.includes("partly") || condition.includes("mostly") ? "⛅" : "☁";
+  return "☀";
+}
+
+function renderHourlyForecast(periods) {
+  $("#hourly-slots").innerHTML = periods.map((period) => {
+    const time = new Intl.DateTimeFormat("en-US", { timeZone: office.timezone, hour: "numeric", hour12: true }).format(new Date(period.startTime));
+    const precipitation = period.probabilityOfPrecipitation?.value;
+    const chance = precipitation === null || precipitation === undefined ? "--" : `${precipitation}%`;
+    return `<article class="hourly-slot">
+      <time>${time}</time><span class="weather-symbol" aria-hidden="true">${weatherSymbol(period.shortForecast)}</span>
+      <strong>${period.temperature}°</strong><span class="hourly-condition">${period.shortForecast}</span>
+      <span class="hourly-detail">RAIN ${chance} · ${period.windDirection} ${period.windSpeed}</span>
+    </article>`;
+  }).join("");
 }
 
 function radarUrl(date) {
@@ -195,8 +220,12 @@ function overlaps(candidate, placed) {
 
 function cityLabels() {
   const positions = [[10, -10], [10, 16], [-10, -10], [-10, 16], [44, -10], [44, 16], [-44, -10], [-44, 16]];
-  const placed = [];
-  return NEBRASKA_CITIES.slice().sort((a, b) => b[3] - a[3]).map(([name, longitude, latitude]) => {
+  const [officeX, officeY] = project([office.coordinates.longitude, office.coordinates.latitude]);
+  const placed = [{ x: officeX + 10, y: officeY - 38, width: 110, height: 28 }];
+  return NEBRASKA_CITIES.slice().sort((a, b) => b[3] - a[3]).filter(([, longitude, latitude]) => {
+    const [x, y] = project([longitude, latitude]);
+    return Math.hypot(x - officeX, y - officeY) > 90;
+  }).map(([name, longitude, latitude]) => {
     const [x, y] = project([longitude, latitude]);
     const width = name.length * 7.2 + 8;
     const choices = positions.map(([dx, dy]) => ({ x: x + dx - (dx < 0 ? width : 0), y: y + dy - 10, width, height: 15, dx, dy }));
@@ -215,7 +244,7 @@ function renderGeographicOverlay(states, counties) {
   const nebraskaCountyPaths = counties
     .map((county) => `<path class="county-boundary" d="${geometryToPath(county)}"/>`).join("");
   const [officeX, officeY] = project([office.coordinates.longitude, office.coordinates.latitude]);
-  $("#geographic-overlay").innerHTML = `${visibleStatePaths}${nebraskaCountyPaths}${cityLabels()}<g class="office-marker"><circle cx="${officeX}" cy="${officeY}" r="8"/><circle cx="${officeX}" cy="${officeY}" r="3.5"/><text x="${officeX + 13}" y="${officeY - 12}">DAVID CITY</text></g>`;
+  $("#geographic-overlay").innerHTML = `${visibleStatePaths}${nebraskaCountyPaths}${cityLabels()}<g class="office-marker"><path d="M${officeX},${officeY} L${officeX + 12},${officeY - 24}"/><circle cx="${officeX}" cy="${officeY}" r="9"/><circle cx="${officeX}" cy="${officeY}" r="3.5"/><text x="${officeX + 16}" y="${officeY - 27}">DAVID CITY</text></g>`;
 }
 
 async function loadGeographicOverlay() {
