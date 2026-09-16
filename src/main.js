@@ -7,7 +7,19 @@ const NWS_HOST = "https://api.weather.gov";
 const RADAR_REFRESH_MS = 5 * 60 * 1000;
 const RADAR_FRAME_MS = 900;
 const DATA_REFRESH_MS = 10 * 60 * 1000;
+const RADAR_BOUNDS = { west: -126, east: -66, south: 24, north: 50 };
+const BOUNDARY_DATA_URL = `${import.meta.env.BASE_URL}boundaries-nebraska-region.json`;
 const $ = (selector) => document.querySelector(selector);
+const NEBRASKA_CITIES = [
+  ["Omaha", -95.9345, 41.2565, 486051], ["Lincoln", -96.7026, 40.8136, 291082],
+  ["Bellevue", -95.8941, 41.1544, 64091], ["Grand Island", -98.3420, 40.9264, 51820],
+  ["Kearney", -99.0815, 40.6993, 34000], ["Fremont", -96.4981, 41.4334, 27141],
+  ["Hastings", -98.3903, 40.5863, 25152], ["Norfolk", -97.4170, 42.0283, 24676],
+  ["Columbus", -97.3698, 41.4303, 24502], ["Papillion", -96.0414, 41.1544, 24459],
+  ["North Platte", -100.7654, 41.1403, 23146], ["La Vista", -96.0453, 41.1839, 16746],
+  ["Scottsbluff", -103.6672, 41.8666, 14732], ["South Sioux City", -96.4142, 42.4739, 13853],
+  ["Beatrice", -96.7461, 40.2681, 12401], ["Lexington", -99.7418, 40.7808, 10290]
+];
 
 document.title = `${office.name} Weather | PosterBooking`;
 $("#app").innerHTML = `
@@ -36,12 +48,8 @@ $("#app").innerHTML = `
         <div id="radar-map" class="radar-map">
           <div class="map-grid"></div>
           <img id="radar-image" alt="Latest NEXRAD precipitation radar mosaic focused on Nebraska" />
-          <svg class="state-outline" viewBox="0 0 100 42" preserveAspectRatio="none" aria-hidden="true">
-            <path d="M4 6 L22 5 L39 8 L55 9 L73 10 L94 12 L95 34 L77 33 L60 35 L43 35 L25 37 L6 36 Z" />
-          </svg>
-          <div class="location-pin"><i></i><span>DAVID CITY</span></div>
-          <div class="map-label north">SOUTH DAKOTA</div><div class="map-label south">KANSAS</div>
-          <div class="map-label west">WYOMING</div><div class="map-label east">IOWA</div>
+          <svg id="geographic-overlay" class="geographic-overlay" viewBox="0 0 1200 520" preserveAspectRatio="none" aria-label="State, Nebraska county, and city boundary overlay"></svg>
+          <div id="geography-status" class="geography-status">BORDERS LOADING</div>
           <div class="radar-legend"><span>LIGHT</span><i></i><i></i><i></i><i></i><span>HEAVY</span></div>
         </div>
         <div class="radar-footer"><span id="frame-time">Awaiting radar imagery</span><span>NOAA NEXRAD mosaic via Iowa Environmental Mesonet</span></div>
@@ -138,13 +146,88 @@ function radarTime(date) {
 }
 
 function applyRadarCrop() {
-  const bounds = { west: -126, east: -66, south: 24, north: 50 };
   const viewport = office.radarViewport;
-  const width = ((bounds.east - bounds.west) / (viewport.east - viewport.west)) * 100;
-  const height = ((bounds.north - bounds.south) / (viewport.north - viewport.south)) * 100;
-  const left = -((viewport.west - bounds.west) / (bounds.east - bounds.west)) * width;
-  const top = -((bounds.north - viewport.north) / (bounds.north - bounds.south)) * height;
+  const width = ((RADAR_BOUNDS.east - RADAR_BOUNDS.west) / (viewport.east - viewport.west)) * 100;
+  const height = ((RADAR_BOUNDS.north - RADAR_BOUNDS.south) / (viewport.north - viewport.south)) * 100;
+  const left = -((viewport.west - RADAR_BOUNDS.west) / (RADAR_BOUNDS.east - RADAR_BOUNDS.west)) * width;
+  const top = -((RADAR_BOUNDS.north - viewport.north) / (RADAR_BOUNDS.north - RADAR_BOUNDS.south)) * height;
   Object.assign($("#radar-image").style, { width: `${width}%`, height: `${height}%`, left: `${left}%`, top: `${top}%` });
+}
+
+function project([longitude, latitude]) {
+  const viewport = office.radarViewport;
+  return [
+    ((longitude - viewport.west) / (viewport.east - viewport.west)) * 1200,
+    ((viewport.north - latitude) / (viewport.north - viewport.south)) * 520
+  ];
+}
+
+function coordinatesToPath(coordinates) {
+  return coordinates.map((ring) => ring.map((point, index) => {
+    const [x, y] = project(point);
+    return `${index ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join("") + "Z").join("");
+}
+
+function geometryToPath(geometry) {
+  if (geometry.type === "Polygon") return coordinatesToPath(geometry.coordinates);
+  if (geometry.type === "MultiPolygon") return geometry.coordinates.map(coordinatesToPath).join("");
+  return "";
+}
+
+function geometryTouchesViewport(geometry) {
+  const visit = (coordinates) => coordinates.some((entry) => {
+    if (typeof entry[0] === "number") {
+      return entry[0] >= office.radarViewport.west && entry[0] <= office.radarViewport.east
+        && entry[1] >= office.radarViewport.south && entry[1] <= office.radarViewport.north;
+    }
+    return visit(entry);
+  });
+  return visit(geometry.coordinates);
+}
+
+function overlaps(candidate, placed) {
+  return placed.some((label) => candidate.x < label.x + label.width + 8
+    && candidate.x + candidate.width + 8 > label.x
+    && candidate.y < label.y + label.height + 4
+    && candidate.y + candidate.height + 4 > label.y);
+}
+
+function cityLabels() {
+  const positions = [[10, -10], [10, 16], [-10, -10], [-10, 16], [44, -10], [44, 16], [-44, -10], [-44, 16]];
+  const placed = [];
+  return NEBRASKA_CITIES.slice().sort((a, b) => b[3] - a[3]).map(([name, longitude, latitude]) => {
+    const [x, y] = project([longitude, latitude]);
+    const width = name.length * 7.2 + 8;
+    const choices = positions.map(([dx, dy]) => ({ x: x + dx - (dx < 0 ? width : 0), y: y + dy - 10, width, height: 15, dx, dy }));
+    const choice = choices.find((item) => !overlaps(item, placed)) || choices.reduce((best, item) => (
+      placed.filter((label) => overlaps(item, [label])).length < placed.filter((label) => overlaps(best, [label])).length ? item : best
+    ));
+    placed.push(choice);
+    return `<g class="city-label"><circle cx="${x}" cy="${y}" r="2.7"/><path d="M${x},${y} L${choice.x + (choice.dx < 0 ? choice.width : 0)},${choice.y + 9}"/><text x="${choice.x}" y="${choice.y + 10}">${name.toUpperCase()}</text></g>`;
+  }).join("");
+}
+
+function renderGeographicOverlay(states, counties) {
+  const visibleStatePaths = states
+    .filter(geometryTouchesViewport)
+    .map((state) => `<path class="state-boundary" d="${geometryToPath(state)}"/>`).join("");
+  const nebraskaCountyPaths = counties
+    .map((county) => `<path class="county-boundary" d="${geometryToPath(county)}"/>`).join("");
+  const [officeX, officeY] = project([office.coordinates.longitude, office.coordinates.latitude]);
+  $("#geographic-overlay").innerHTML = `${visibleStatePaths}${nebraskaCountyPaths}${cityLabels()}<g class="office-marker"><circle cx="${officeX}" cy="${officeY}" r="8"/><circle cx="${officeX}" cy="${officeY}" r="3.5"/><text x="${officeX + 13}" y="${officeY - 12}">DAVID CITY</text></g>`;
+}
+
+async function loadGeographicOverlay() {
+  try {
+    const boundaries = await fetchJson(BOUNDARY_DATA_URL);
+    renderGeographicOverlay(boundaries.states, boundaries.counties);
+    $("#geography-status").remove();
+  } catch (error) {
+    $("#geography-status").textContent = "BORDERS UNAVAILABLE";
+    $("#geography-status").classList.add("error");
+    console.warn("Census boundary request failed:", error);
+  }
 }
 
 function loadImage(url, date) {
@@ -199,6 +282,7 @@ async function loadRadar() {
 }
 
 applyRadarCrop();
+loadGeographicOverlay();
 fitSlideToViewport();
 window.addEventListener("resize", fitSlideToViewport, { passive: true });
 updateClock();
