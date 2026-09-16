@@ -182,9 +182,20 @@ function timingCue(period) {
   return "TONIGHT";
 }
 
+function weatherSymbol(shortForecast) {
+  const condition = (shortForecast || "").toLowerCase();
+  if (condition.includes("thunder")) return "⚡";
+  if (condition.includes("snow") || condition.includes("flurr") || condition.includes("sleet") || condition.includes("ice")) return "❄";
+  if (condition.includes("rain") || condition.includes("shower") || condition.includes("drizzle")) return "☂";
+  if (condition.includes("fog") || condition.includes("haze") || condition.includes("smoke")) return "≋";
+  if (condition.includes("wind")) return "≋";
+  if (condition.includes("cloud") || condition.includes("overcast")) return condition.includes("partly") || condition.includes("mostly") ? "⛅" : "☁";
+  return "☀";
+}
+
 function forecastIcon(period) {
   const label = period.shortForecast || "Weather forecast";
-  return `<span class="forecast-icon"><img src="${period.icon}" alt="${label}" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><span class="icon-fallback" hidden aria-label="${label}">NWS</span></span>`;
+  return `<span class="forecast-icon" role="img" aria-label="${label}">${weatherSymbol(label)}</span>`;
 }
 
 function enableConditionMarquees() {
