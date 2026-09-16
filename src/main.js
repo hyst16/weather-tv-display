@@ -138,7 +138,7 @@ async function loadWeather() {
     $("#humidity").textContent = props.relativeHumidity?.value === null ? "--" : `${Math.round(props.relativeHumidity.value)}%`;
     $("#observation-note").textContent = `Current observation: ${weatherSources.station.name} (${weatherSources.station.stationIdentifier}), ${miles(weatherSources.station.distance.value)} from David City. Observed ${new Date(props.timestamp).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: office.timezone })} CT.`;
 
-    const periods = hourlyForecast.properties.periods?.slice(0, 4);
+    const periods = upcomingFullHourPeriods(hourlyForecast.properties.periods || [], new Date());
     if (periods?.length) {
       cachedHourlyPeriods = periods;
       cachedDailyPeriods = dailyForecast.properties.periods || [];
@@ -164,14 +164,38 @@ async function loadWeather() {
   }
 }
 
-function weatherSymbol(shortForecast) {
-  const condition = shortForecast.toLowerCase();
-  if (condition.includes("thunder")) return "⚡";
-  if (condition.includes("snow") || condition.includes("flurr")) return "❄";
-  if (condition.includes("rain") || condition.includes("shower") || condition.includes("drizzle")) return "☂";
-  if (condition.includes("fog") || condition.includes("haze")) return "≋";
-  if (condition.includes("cloud")) return condition.includes("partly") || condition.includes("mostly") ? "⛅" : "☁";
-  return "☀";
+function upcomingFullHourPeriods(periods, now) {
+  const nextHour = new Date(now);
+  nextHour.setMinutes(0, 0, 0);
+  nextHour.setHours(nextHour.getHours() + 1);
+  const futurePeriods = periods.filter((period) => new Date(period.endTime) > now);
+  const nextFullHourPeriods = futurePeriods.filter((period) => new Date(period.startTime) >= nextHour).slice(0, 3);
+  return nextFullHourPeriods.length ? nextFullHourPeriods : futurePeriods.slice(0, 3);
+}
+
+function timingCue(period) {
+  const hour = Number(new Intl.DateTimeFormat("en-US", { timeZone: office.timezone, hour: "numeric", hourCycle: "h23" }).format(new Date(period.startTime)));
+  if (hour < 6) return "OVERNIGHT";
+  if (hour < 12) return "THIS MORNING";
+  if (hour < 17) return "THIS AFTERNOON";
+  if (hour < 21) return "EARLY EVENING";
+  return "TONIGHT";
+}
+
+function forecastIcon(period) {
+  const label = period.shortForecast || "Weather forecast";
+  return `<span class="forecast-icon"><img src="${period.icon}" alt="${label}" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><span class="icon-fallback" hidden aria-label="${label}">NWS</span></span>`;
+}
+
+function enableConditionMarquees() {
+  document.querySelectorAll(".condition-clip").forEach((clip) => {
+    const text = clip.firstElementChild;
+    if (text.scrollWidth > clip.clientWidth) {
+      const distance = text.scrollWidth - clip.clientWidth;
+      text.style.setProperty("--marquee-distance", `-${distance}px`);
+      text.classList.add("condition-marquee");
+    }
+  });
 }
 
 function renderHourlyForecast(periods) {
@@ -180,9 +204,9 @@ function renderHourlyForecast(periods) {
     const precipitation = period.probabilityOfPrecipitation?.value;
     const chance = precipitation === null || precipitation === undefined ? "--" : `${precipitation}%`;
     return `<article class="forecast-slot hourly-slot">
-      <time>${time}</time><span class="weather-symbol" aria-hidden="true">${weatherSymbol(period.shortForecast)}</span>
-      <strong>${period.temperature}°</strong><span class="hourly-condition">${period.shortForecast}</span>
-      <span class="hourly-detail">RAIN ${chance} · ${period.windDirection} ${period.windSpeed}</span>
+      <time>${time}<small>${timingCue(period)}</small></time>${forecastIcon(period)}
+      <strong>${period.temperature}°</strong><span class="condition-clip"><span>${period.shortForecast}</span></span>
+      <span class="hourly-detail">PRECIP ${chance} · ${period.windDirection} ${period.windSpeed}</span>
     </article>`;
   }).join("");
 }
@@ -194,8 +218,8 @@ function renderDailyForecast(periods) {
     const precipitation = period.probabilityOfPrecipitation?.value;
     const chance = precipitation === null || precipitation === undefined ? "--" : `${precipitation}%`;
     return `<article class="forecast-slot daily-slot">
-      <time>${day}</time><span class="weather-symbol" aria-hidden="true">${weatherSymbol(period.shortForecast)}</span>
-      <strong>${period.temperature}°</strong><span class="hourly-condition">${period.shortForecast}</span>
+      <time>${day}</time>${forecastIcon(period)}
+      <strong>${period.temperature}°</strong><span class="condition-clip"><span>${period.shortForecast}</span></span>
       <span class="hourly-detail">PRECIP ${chance} · ${period.windDirection} ${period.windSpeed}</span>
     </article>`;
   }).join("");
@@ -207,6 +231,7 @@ function renderForecastView(hourlyPeriods, dailyPeriods) {
   void $("#forecast-slots").offsetWidth;
   $("#forecast-slots").classList.add("forecast-fade");
   $("#forecast-slots").innerHTML = forecastView === "hourly" ? renderHourlyForecast(hourlyPeriods) : renderDailyForecast(dailyPeriods);
+  requestAnimationFrame(enableConditionMarquees);
 }
 
 let cachedHourlyPeriods = [];
