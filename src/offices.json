@@ -1,0 +1,25 @@
+{
+  "david-city-ne": {
+    "slug": "david-city-ne",
+    "name": "David City",
+    "state": "Nebraska",
+    "stateCode": "NE",
+    "coordinates": { "latitude": 41.2528, "longitude": -97.1301 },
+    "timezone": "America/Chicago",
+    "radar": {
+      "coverage": "iem-conus",
+      "windowDegrees": { "longitude": 6.8, "latitude": 2.95 }
+    },
+    "boundaryOverlay": "nebraska",
+    "nearbyCities": [
+      ["Omaha", -95.9345, 41.2565, 486051], ["Lincoln", -96.7026, 40.8136, 291082],
+      ["Bellevue", -95.8941, 41.1544, 64091], ["Grand Island", -98.3420, 40.9264, 51820],
+      ["Kearney", -99.0815, 40.6993, 34000], ["Fremont", -96.4981, 41.4334, 27141],
+      ["Hastings", -98.3903, 40.5863, 25152], ["Norfolk", -97.4170, 42.0283, 24676],
+      ["Columbus", -97.3698, 41.4303, 24502], ["Papillion", -96.0414, 41.1544, 24459],
+      ["North Platte", -100.7654, 41.1403, 23146], ["La Vista", -96.0453, 41.1839, 16746],
+      ["Scottsbluff", -103.6672, 41.8666, 14732], ["South Sioux City", -96.4142, 42.4739, 13853],
+      ["Beatrice", -96.7461, 40.2681, 12401], ["Lexington", -99.7418, 40.7808, 10290]
+    ]
+  }
+}

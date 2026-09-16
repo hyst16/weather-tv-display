@@ -14,16 +14,6 @@ const FORECAST_ROTATION_MS = 20 * 1000;
 let weatherSources;
 let forecastView = "hourly";
 let forecastRotationTimer;
-const NEBRASKA_CITIES = [
-  ["Omaha", -95.9345, 41.2565, 486051], ["Lincoln", -96.7026, 40.8136, 291082],
-  ["Bellevue", -95.8941, 41.1544, 64091], ["Grand Island", -98.3420, 40.9264, 51820],
-  ["Kearney", -99.0815, 40.6993, 34000], ["Fremont", -96.4981, 41.4334, 27141],
-  ["Hastings", -98.3903, 40.5863, 25152], ["Norfolk", -97.4170, 42.0283, 24676],
-  ["Columbus", -97.3698, 41.4303, 24502], ["Papillion", -96.0414, 41.1544, 24459],
-  ["North Platte", -100.7654, 41.1403, 23146], ["La Vista", -96.0453, 41.1839, 16746],
-  ["Scottsbluff", -103.6672, 41.8666, 14732], ["South Sioux City", -96.4142, 42.4739, 13853],
-  ["Beatrice", -96.7461, 40.2681, 12401], ["Lexington", -99.7418, 40.7808, 10290]
-];
 
 document.title = `${office.name} Weather Display`;
 $("#app").innerHTML = `
@@ -46,13 +36,13 @@ $("#app").innerHTML = `
       </section>
       <section class="radar panel" aria-label="Animated precipitation radar">
         <div class="radar-heading">
-          <div><div class="panel-label">PRECIPITATION RADAR</div><strong>${office.radarLabel}</strong></div>
+          <div><div class="panel-label">PRECIPITATION RADAR</div><strong>${office.name} regional composite</strong></div>
           <div id="radar-status" class="data-status loading">Loading frames</div>
         </div>
         <div id="radar-map" class="radar-map">
           <div class="map-grid"></div>
-          <img id="radar-image" alt="Latest NEXRAD precipitation radar mosaic focused on Nebraska" />
-          <svg id="geographic-overlay" class="geographic-overlay" viewBox="0 0 1200 520" preserveAspectRatio="none" aria-label="State, Nebraska county, and city boundary overlay"></svg>
+          <img id="radar-image" alt="Latest NEXRAD precipitation radar mosaic centered on ${office.name}, ${office.state}" />
+          <svg id="geographic-overlay" class="geographic-overlay" viewBox="0 0 1200 520" preserveAspectRatio="none" aria-label="Geographic overlay centered on ${office.name}, ${office.state}"></svg>
           <div id="geography-status" class="geography-status">BORDERS LOADING</div>
           <div class="radar-legend"><span>LIGHT</span><i></i><i></i><i></i><i></i><span>HEAVY</span></div>
         </div>
@@ -60,8 +50,8 @@ $("#app").innerHTML = `
       </section>
       <aside class="forecast panel" aria-label="Forecast">
         <div class="forecast-heading"><div id="forecast-title" class="panel-label">NEXT HOURS</div><div id="forecast-status" class="data-status loading">Loading</div></div>
-        <div id="forecast-slots" class="forecast-slots" aria-live="polite"><div class="forecast-loading">Loading David City point forecast…</div></div>
-        <div class="forecast-footer"><span>OFFICIAL DAVID CITY POINT FORECAST</span><span id="forecast-updated">ISSUED BY NWS OMAHA/VALLEY</span></div>
+        <div id="forecast-slots" class="forecast-slots" aria-live="polite"><div class="forecast-loading">Loading ${office.name} point forecast…</div></div>
+        <div class="forecast-footer"><span id="forecast-source">OFFICIAL ${office.name.toUpperCase()} POINT FORECAST</span><span id="forecast-updated">NWS SOURCE LOADING</span></div>
       </aside>
     </section>
     <footer class="footer"><span id="system-status">DATA: CONNECTING</span><span>WEATHER AWARENESS DISPLAY — CHECK OFFICIAL ALERTS</span><span id="last-refresh">--</span></footer>
@@ -70,6 +60,24 @@ $("#app").innerHTML = `
 
 function celsiusToFahrenheit(value) {
   return value === null || value === undefined ? null : Math.round((value * 9) / 5 + 32);
+}
+
+function radarViewport() {
+  const halfLongitude = office.radar.windowDegrees.longitude / 2;
+  const halfLatitude = office.radar.windowDegrees.latitude / 2;
+  return {
+    west: office.coordinates.longitude - halfLongitude,
+    east: office.coordinates.longitude + halfLongitude,
+    south: office.coordinates.latitude - halfLatitude,
+    north: office.coordinates.latitude + halfLatitude
+  };
+}
+
+function radarSupported() {
+  const viewport = radarViewport();
+  return office.radar.coverage === "iem-conus"
+    && viewport.west >= RADAR_BOUNDS.west && viewport.east <= RADAR_BOUNDS.east
+    && viewport.south >= RADAR_BOUNDS.south && viewport.north <= RADAR_BOUNDS.north;
 }
 
 function formatWind(speed, direction) {
@@ -82,8 +90,13 @@ function stamp() {
   return new Intl.DateTimeFormat("en-US", { timeZone: office.timezone, hour: "numeric", minute: "2-digit", second: "2-digit", hour12: true }).format(new Date());
 }
 
+function zoneName(date = new Date()) {
+  return new Intl.DateTimeFormat("en-US", { timeZone: office.timezone, timeZoneName: "short" })
+    .formatToParts(date).find((part) => part.type === "timeZoneName").value;
+}
+
 function updateClock() {
-  $("#clock").textContent = `${stamp()} CT`;
+  $("#clock").textContent = `${stamp()} ${zoneName()}`;
 }
 
 function fitSlideToViewport() {
@@ -117,10 +130,14 @@ async function initializeWeatherSources() {
   weatherSources = {
     daily: props.forecast,
     hourly: props.forecastHourly,
+    office: props.forecastOffice.split("/").pop(),
     station: nearestStation.properties,
     observation: `${NWS_HOST}/stations/${nearestStation.properties.stationIdentifier}/observations/latest`
   };
-  $("#observation-note").textContent = `Current observation: ${weatherSources.station.name} (${weatherSources.station.stationIdentifier}), ${miles(weatherSources.station.distance.value)} from David City.`;
+  const officeName = props.forecastOffice.split("/").pop();
+  $("#observation-note").textContent = `Current observation: ${weatherSources.station.name} (${weatherSources.station.stationIdentifier}), ${miles(weatherSources.station.distance.value)} from ${office.name}.`;
+  $("#forecast-source").textContent = `OFFICIAL ${office.name.toUpperCase()} POINT FORECAST`;
+  $("#forecast-updated").textContent = `ISSUED BY NWS ${officeName}`;
 }
 
 async function loadWeather() {
@@ -136,10 +153,10 @@ async function loadWeather() {
     $("#condition").textContent = props.textDescription || "Conditions unavailable";
     $("#wind").textContent = formatWind(props.windSpeed?.value, props.windDirection?.value);
     $("#humidity").textContent = props.relativeHumidity?.value === null ? "--" : `${Math.round(props.relativeHumidity.value)}%`;
-    $("#observation-note").textContent = `Current observation: ${weatherSources.station.name} (${weatherSources.station.stationIdentifier}), ${miles(weatherSources.station.distance.value)} from David City. Observed ${new Date(props.timestamp).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: office.timezone })} CT.`;
+    $("#observation-note").textContent = `Current observation: ${weatherSources.station.name} (${weatherSources.station.stationIdentifier}), ${miles(weatherSources.station.distance.value)} from ${office.name}. Observed ${new Date(props.timestamp).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: office.timezone })} ${zoneName(new Date(props.timestamp))}.`;
 
     const periods = upcomingFullHourPeriods(hourlyForecast.properties.periods || [], new Date());
-    if (periods?.length) {
+    if (periods.length === 4) {
       cachedHourlyPeriods = periods;
       cachedDailyPeriods = dailyForecast.properties.periods || [];
       forecastView = "hourly";
@@ -147,15 +164,15 @@ async function loadWeather() {
       startForecastRotation();
       $("#forecast-status").textContent = "Live";
       $("#forecast-status").className = "data-status live";
-      $("#forecast-updated").textContent = `ISSUED ${new Date(hourlyForecast.properties.updateTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: office.timezone })} CT · NWS OMAHA/VALLEY`;
+      $("#forecast-updated").textContent = `ISSUED ${new Date(hourlyForecast.properties.updateTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: office.timezone })} ${zoneName()} · NWS ${weatherSources.office}`;
     } else {
-      throw new Error("NWS hourly forecast contained no periods");
+      throw new Error(`NWS supplied only ${periods.length} future full-hour periods`);
     }
     $("#system-status").textContent = "DATA: LIVE NOAA / NWS";
-    $("#last-refresh").textContent = `UPDATED ${stamp()} CT`;
+    $("#last-refresh").textContent = `UPDATED ${stamp()} ${zoneName()}`;
   } catch (error) {
     $("#condition").textContent = "NOAA conditions unavailable";
-    $("#forecast-slots").innerHTML = `<div class="forecast-loading error-copy">David City point forecast unavailable. Retrying automatically.</div>`;
+    $("#forecast-slots").innerHTML = `<div class="forecast-loading error-copy">${office.name} point forecast needs four future full-hour periods. Retrying automatically.</div>`;
     $("#forecast-status").textContent = "Retrying";
     $("#forecast-status").className = "data-status error";
     $("#forecast-updated").textContent = "NWS RETRYING";
@@ -169,8 +186,7 @@ function upcomingFullHourPeriods(periods, now) {
   nextHour.setMinutes(0, 0, 0);
   nextHour.setHours(nextHour.getHours() + 1);
   const futurePeriods = periods.filter((period) => new Date(period.endTime) > now);
-  const nextFullHourPeriods = futurePeriods.filter((period) => new Date(period.startTime) >= nextHour).slice(0, 3);
-  return nextFullHourPeriods.length ? nextFullHourPeriods : futurePeriods.slice(0, 3);
+  return futurePeriods.filter((period) => new Date(period.startTime) >= nextHour).slice(0, 4);
 }
 
 function timingCue(period) {
@@ -210,7 +226,7 @@ function enableConditionMarquees() {
 }
 
 function renderHourlyForecast(periods) {
-  return periods.slice(0, 3).map((period) => {
+  return periods.slice(0, 4).map((period) => {
     const time = new Intl.DateTimeFormat("en-US", { timeZone: office.timezone, hour: "numeric", hour12: true }).format(new Date(period.startTime));
     const precipitation = period.probabilityOfPrecipitation?.value;
     const chance = precipitation === null || precipitation === undefined ? "--" : `${precipitation}%`;
@@ -272,7 +288,7 @@ function radarTime(date) {
 }
 
 function applyRadarCrop() {
-  const viewport = office.radarViewport;
+  const viewport = radarViewport();
   const width = ((RADAR_BOUNDS.east - RADAR_BOUNDS.west) / (viewport.east - viewport.west)) * 100;
   const height = ((RADAR_BOUNDS.north - RADAR_BOUNDS.south) / (viewport.north - viewport.south)) * 100;
   const left = -((viewport.west - RADAR_BOUNDS.west) / (RADAR_BOUNDS.east - RADAR_BOUNDS.west)) * width;
@@ -281,7 +297,7 @@ function applyRadarCrop() {
 }
 
 function project([longitude, latitude]) {
-  const viewport = office.radarViewport;
+  const viewport = radarViewport();
   return [
     ((longitude - viewport.west) / (viewport.east - viewport.west)) * 1200,
     ((viewport.north - latitude) / (viewport.north - viewport.south)) * 520
@@ -304,8 +320,9 @@ function geometryToPath(geometry) {
 function geometryTouchesViewport(geometry) {
   const visit = (coordinates) => coordinates.some((entry) => {
     if (typeof entry[0] === "number") {
-      return entry[0] >= office.radarViewport.west && entry[0] <= office.radarViewport.east
-        && entry[1] >= office.radarViewport.south && entry[1] <= office.radarViewport.north;
+      const viewport = radarViewport();
+      return entry[0] >= viewport.west && entry[0] <= viewport.east
+        && entry[1] >= viewport.south && entry[1] <= viewport.north;
     }
     return visit(entry);
   });
@@ -323,7 +340,7 @@ function cityLabels() {
   const positions = [[10, -10], [10, 16], [-10, -10], [-10, 16], [44, -10], [44, 16], [-44, -10], [-44, 16]];
   const [officeX, officeY] = project([office.coordinates.longitude, office.coordinates.latitude]);
   const placed = [{ x: officeX + 10, y: officeY - 38, width: 110, height: 28 }];
-  return NEBRASKA_CITIES.slice().sort((a, b) => b[3] - a[3]).filter(([, longitude, latitude]) => {
+  return (office.nearbyCities || []).slice().sort((a, b) => b[3] - a[3]).filter(([, longitude, latitude]) => {
     const [x, y] = project([longitude, latitude]);
     return Math.hypot(x - officeX, y - officeY) > 90;
   }).map(([name, longitude, latitude]) => {
@@ -345,10 +362,14 @@ function renderGeographicOverlay(states, counties) {
   const nebraskaCountyPaths = counties
     .map((county) => `<path class="county-boundary" d="${geometryToPath(county)}"/>`).join("");
   const [officeX, officeY] = project([office.coordinates.longitude, office.coordinates.latitude]);
-  $("#geographic-overlay").innerHTML = `${visibleStatePaths}${nebraskaCountyPaths}${cityLabels()}<g class="office-marker"><path d="M${officeX},${officeY} L${officeX + 12},${officeY - 24}"/><circle cx="${officeX}" cy="${officeY}" r="9"/><circle cx="${officeX}" cy="${officeY}" r="3.5"/><text x="${officeX + 16}" y="${officeY - 27}">DAVID CITY</text></g>`;
+  $("#geographic-overlay").innerHTML = `${visibleStatePaths}${nebraskaCountyPaths}${cityLabels()}<g class="office-marker"><path d="M${officeX},${officeY} L${officeX + 12},${officeY - 24}"/><circle cx="${officeX}" cy="${officeY}" r="9"/><circle cx="${officeX}" cy="${officeY}" r="3.5"/><text x="${officeX + 16}" y="${officeY - 27}">${office.name.toUpperCase()}</text></g>`;
 }
 
 async function loadGeographicOverlay() {
+  if (office.boundaryOverlay !== "nebraska") {
+    $("#geography-status").textContent = "REGIONAL BORDERS NOT CONFIGURED";
+    return;
+  }
   try {
     const boundaries = await fetchJson(BOUNDARY_DATA_URL);
     renderGeographicOverlay(boundaries.states, boundaries.counties);
@@ -387,6 +408,12 @@ function playRadar() {
 }
 
 async function loadRadar() {
+  if (!radarSupported()) {
+    $("#radar-status").textContent = "Radar not available";
+    $("#radar-status").className = "data-status error";
+    $("#frame-time").textContent = `IEM NEXRAD covers the contiguous U.S.; configure another radar source for ${office.name}.`;
+    return;
+  }
   $("#radar-status").textContent = "Updating radar";
   $("#radar-status").className = "data-status loading";
   const latest = new Date(Date.now() - 10 * 60 * 1000);
@@ -419,7 +446,7 @@ updateClock();
 setInterval(updateClock, 1000);
 initializeWeatherSources().then(loadWeather).catch((error) => {
   $("#condition").textContent = "NOAA sources unavailable";
-  $("#forecast-slots").innerHTML = `<div class="forecast-loading error-copy">David City weather sources unavailable. Retrying automatically.</div>`;
+  $("#forecast-slots").innerHTML = `<div class="forecast-loading error-copy">${office.name} weather sources unavailable. Retrying automatically.</div>`;
   $("#forecast-status").textContent = "Retrying";
   $("#forecast-status").className = "data-status error";
   console.warn("NWS source discovery failed:", error);

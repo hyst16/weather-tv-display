@@ -1,45 +1,62 @@
-# PosterBooking Weather Display
+# Weather TV Display
 
-A no-key, static weather-signage slide for GitHub Pages and PosterBooking. The first office route is **David City, Nebraska**.
-
-## Production URL and routing
-
-After enabling GitHub Pages from the repository's **GitHub Actions** source, the direct signage URL is:
+A keyless, static, 16:9 weather-signage slide for GitHub Pages and website-based TV players. Each slide is selected by a readable configured path, for example:
 
 `https://hyst16.github.io/weather-tv-display/david-city-ne/`
 
-The app uses a real path route (not hash routing). The included Pages workflow writes a fallback copy of `index.html` to `david-city-ne/index.html`, so direct loads and signage webviews do not require server-side SPA rewrites.
+Only **David City, Nebraska** is configured initially. The app is intentionally configuration-led: it does not claim that an arbitrary URL represents a business location.
 
-In PosterBooking, create a Web Page / Website screen, paste that exact URL, set the screen to landscape 16:9, and enable its fullscreen/kiosk option if available. Do not use a cached screenshot or an embedded iframe. Set the screen refresh/reload interval to 15–30 minutes as a recovery measure for long-running signage browsers.
+## Add a city slide
 
-## Deploying
+1. Add one entry to [`src/offices.json`](src/offices.json), keyed by a unique URL-safe `slug`.
+2. Provide the city display `name`, full `state`, two-letter `stateCode`, WGS84 `coordinates`, IANA `timezone`, and `radar` configuration. Coordinates are the authoritative input—obtain and verify them before adding a location.
+3. For IEM NEXRAD coverage, retain `"coverage": "iem-conus"` and the supplied `windowDegrees`. The app centers this fixed 6.8° longitude × 2.95° latitude visual window on the configured coordinates.
+4. Optionally set `boundaryOverlay` and `nearbyCities` only when a matching local boundary asset is included. The current `nebraska` overlay is intentionally specific to David City.
+5. Commit and push to `main`. `npm run build` reads the JSON and creates `dist/<slug>/index.html` for every configured office, making direct loads and refreshes work on GitHub Pages.
 
-1. Push this branch to GitHub and merge it into `main`.
-2. In **Settings → Pages**, choose **GitHub Actions** as the source.
-3. The [Pages workflow](.github/workflows/deploy-pages.yml) builds and deploys every push to `main`.
-4. Wait for the Pages deployment to complete, then open the URL above once to confirm it renders.
+The configuration schema is:
 
-Local development:
+```json
+{
+  "city-state-slug": {
+    "slug": "city-state-slug",
+    "name": "City",
+    "state": "State",
+    "stateCode": "ST",
+    "coordinates": { "latitude": 0, "longitude": 0 },
+    "timezone": "Area/City",
+    "radar": {
+      "coverage": "iem-conus",
+      "windowDegrees": { "longitude": 6.8, "latitude": 2.95 }
+    },
+    "boundaryOverlay": "optional-known-overlay",
+    "nearbyCities": []
+  }
+}
+```
+
+## Data and coverage
+
+For every configured office, the browser requests `https://api.weather.gov/points/<latitude>,<longitude>`. It then follows **that response's** `forecast`, `forecastHourly`, and `observationStations` URLs. The nearest station in the returned official station list supplies current conditions and its human-readable name, station ID, distance, and observation time are displayed. Forecast attribution identifies the configured city point forecast and the NWS issuing office returned by the point metadata.
+
+Hourly signage displays exactly four periods starting with the next full local hour; if NWS temporarily provides fewer than four, the panel clearly says it is retrying rather than silently showing a partial set. The panel cross-fades every 20 seconds between the four-hour and four-day views. Local accessible condition glyphs, timing cues, and overflow-only marquee text remain independent of remote image assets.
+
+Animated radar uses Iowa Environmental Mesonet's keyless NEXRAD mosaic archive, refreshed every five minutes, with eight recent frames. Its raster is WGS84/EPSG:4326 and is projected with the computed office-centered viewport. This provider is supported only where the requested window fits its **contiguous U.S.** extent (24°–50°N, 126°–66°W). Locations outside it show an actionable “Radar not available” message; the app does not fabricate worldwide coverage. NWS forecast availability is also U.S. and territory dependent. Public services can be delayed, changed, rate-limited, or blocked by signage networks; loading, error, and stale/retry states are visible.
+
+## Deploy and display
+
+1. In GitHub **Settings → Pages**, choose **GitHub Actions** as the source.
+2. Merge or push the change to `main`; `.github/workflows/deploy-pages.yml` runs `npm ci` and `npm run build`, then deploys the generated static paths.
+3. In PosterBooking or another website signage player, configure a landscape 16:9 Website/Web Page screen with the exact configured URL, such as the David City URL above. Prefer kiosk/fullscreen mode and a 15–30 minute player reload as a recovery measure.
+
+The slide is a fixed 1920×1080 logical canvas. It uses JavaScript to uniformly scale and center itself for any browser or fullscreen-webview dimensions with root overflow disabled, so it does not depend on a desktop viewport and does not introduce document scrollbars. This is an awareness display, not an official warning source; keep official-alert procedures in place.
+
+## Development
 
 ```sh
 npm install
+npm run build
 npm run dev
 ```
 
-`npm run build` produces the static `dist/` deployment bundle.
-
-## Data sources, reliability, and limitations
-
-The slide requests current observation and forecast data from the keyless [NWS API](https://www.weather.gov/documentation/services-web-api), and NEXRAD reflectivity mosaics from the [Iowa Environmental Mesonet](https://mesonet.agron.iastate.edu/docs/nexrad_composites/). IEM documents that its mosaics are generated from NEXRAD Level III products every five minutes. Eight completed archive slots are requested with a 10-minute safety delay; successfully loaded frames animate automatically every 900 ms. Radar refreshes every five minutes and NWS content every ten minutes.
-
-Radar geographic overlays are projected directly into the IEM raster's documented EPSG:4326 extent. State and Nebraska-only county boundaries come from the repository-hosted `public/boundaries-nebraska-region.json` extract of the U.S. Census Bureau Cartographic Boundary Files (via [us-atlas](https://github.com/topojson/us-atlas)); they are not manually drawn. This compact same-origin extract contains only the seven states visible around Nebraska and Nebraska's 93 counties, avoiding a runtime map-service dependency. City locations for all Nebraska municipalities at roughly 10,000+ residents are rendered with a deterministic priority/collision strategy. David City remains the distinct red office marker. If the boundary asset fails to load, the slide labels the overlay unavailable while keeping the radar animation active.
-
-No credentials, API keys, server, or Windy dependency are used. Both remote public services can be rate-limited, unavailable, delayed, changed, or blocked by a restrictive signage network/CSP. The slide visibly identifies loading, unavailable radar, and NWS retry states rather than substituting fabricated weather. It must not be used as an official warning source; keep the NWS/official-alert disclaimer visible.
-
-## Adding offices
-
-Add an entry to `src/offices.js` with its route slug, coordinates, closest reliable NWS observation station, NWS forecast grid URL, time zone, and radar viewport. The shared application selects an entry from the last path segment. For a new direct GitHub Pages path, add that slug to the `mkdir`/copy step in `.github/workflows/deploy-pages.yml` (or replace it with a generated loop).
-
-The visual canvas is always **1920×1080 logical pixels**. CSS scales it uniformly using the smaller browser dimension, centers it in any viewport, and sets `overflow: hidden` at every root level; it does not assume a desktop-sized viewport and produces no document scrollbars.
-
-The David City display uses an eastern-Nebraska radar viewport (`101°W–94.2°W`, `39.85°N–42.8°N`) to provide room around the office while retaining nearby Iowa, Kansas, and South Dakota context. The IEM source raster and overlay geometry are both WGS84/EPSG:4326, so state/county/city features are projected into that exact extent. It first resolves NWS point `41.2528,-97.1301`, which NWS identifies as David City, NE, then follows that response's `forecast`, `forecastHourly`, and `observationStations` URLs. The forecast panel autonomously cross-fades every 20 seconds between three large hourly slots and four daily slots. Hourly signage uses the next full local hour, filtering out periods already ended or in progress; each precipitation chance remains tied to that NWS period's exact displayed hour. Forecast cards use local, accessible weather glyphs derived from the NWS condition text, avoiding remote raster icon loading. Only overflowing condition text slowly pauses and scrolls; reduced-motion settings disable it. It selects the nearest official station from the point response, displays its name/ID/distance and observation time, and refreshes NWS data every ten minutes.
+The build output includes the root entry page plus one static direct route per configured office.
