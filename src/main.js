@@ -1,5 +1,6 @@
 import "./style.css";
 import { getOffice } from "./offices.js";
+import { formatObservedWind } from "./weather-data.js";
 
 const office = getOffice();
 const RADAR_HOST = "https://mesonet.agron.iastate.edu";
@@ -29,7 +30,7 @@ $("#app").innerHTML = `
         <div id="temperature" class="temperature">--<span>°</span></div>
         <div id="condition" class="condition">Loading NOAA observation…</div>
         <div class="observation">
-          <div><span>WIND</span><strong id="wind">--</strong></div>
+          <div><span>SUSTAINED WIND</span><strong id="wind">--</strong></div>
           <div><span>HUMIDITY</span><strong id="humidity">--</strong></div>
         </div>
         <p id="observation-note" class="source-note">Locating the nearest official observation station…</p>
@@ -78,12 +79,6 @@ function radarSupported() {
   return office.radar.coverage === "iem-conus"
     && viewport.west >= RADAR_BOUNDS.west && viewport.east <= RADAR_BOUNDS.east
     && viewport.south >= RADAR_BOUNDS.south && viewport.north <= RADAR_BOUNDS.north;
-}
-
-function formatWind(speed, direction) {
-  if (speed === null || speed === undefined) return "Calm / --";
-  const compass = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Math.round((direction || 0) / 45) % 8];
-  return `${Math.round(speed * 2.237)} mph ${compass}`;
 }
 
 function stamp() {
@@ -151,7 +146,7 @@ async function loadWeather() {
     const fahrenheit = celsiusToFahrenheit(props.temperature?.value);
     $("#temperature").innerHTML = fahrenheit === null ? "--<span>°</span>" : `${fahrenheit}<span>°</span>`;
     $("#condition").textContent = props.textDescription || "Conditions unavailable";
-    $("#wind").textContent = formatWind(props.windSpeed?.value, props.windDirection?.value);
+    $("#wind").textContent = formatObservedWind(props.windSpeed, props.windDirection, props.windGust);
     $("#humidity").textContent = props.relativeHumidity?.value === null ? "--" : `${Math.round(props.relativeHumidity.value)}%`;
     $("#observation-note").textContent = `Current observation: ${weatherSources.station.name} (${weatherSources.station.stationIdentifier}), ${miles(weatherSources.station.distance.value)} from ${office.name}. Observed ${new Date(props.timestamp).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: office.timezone })} ${zoneName(new Date(props.timestamp))}.`;
 
