@@ -4,13 +4,18 @@ A keyless, static, 16:9 weather-signage slide for GitHub Pages and website-based
 
 `https://hyst16.github.io/weather-tv-display/david-city-ne/`
 
-Only **David City, Nebraska** is configured initially. The app is intentionally configuration-led: it does not claim that an arbitrary URL represents a business location.
+Available slides:
+
+- `https://hyst16.github.io/weather-tv-display/david-city-ne/`
+- `https://hyst16.github.io/weather-tv-display/tarnov-ne/`
+
+The app is intentionally configuration-led: it does not claim that an arbitrary URL represents a business location.
 
 ## Add a city slide
 
 1. Add one entry to [`src/offices.json`](src/offices.json), keyed by a unique URL-safe `slug`.
 2. Provide the city display `name`, full `state`, two-letter `stateCode`, WGS84 `coordinates`, IANA `timezone`, and `radar` configuration. Coordinates are the authoritative input—obtain and verify them before adding a location.
-3. For IEM NEXRAD coverage, retain `"coverage": "iem-conus"` and the supplied `windowDegrees`. The app centers this fixed 6.8° longitude × 2.95° latitude visual window on the configured coordinates.
+3. For IEM NEXRAD coverage, retain `"coverage": "iem-conus"` and the supplied `windowDegrees`. The app centers this fixed 6.8° longitude × 2.95° latitude visual window on the configured coordinates. When adding another Nebraska office, reuse the `nebraska` boundary overlay and nearby-city list from an existing entry.
 4. Optionally set `boundaryOverlay` and `nearbyCities` only when a matching local boundary asset is included. The current `nebraska` overlay is intentionally specific to David City.
 5. Commit and push to `main`. `npm run build` reads the JSON and creates `dist/<slug>/index.html` for every configured office, making direct loads and refreshes work on GitHub Pages.
 
@@ -38,6 +43,8 @@ The configuration schema is:
 ## Data and coverage
 
 For every configured office, the browser requests `https://api.weather.gov/points/<latitude>,<longitude>`. It then follows **that response's** `forecast`, `forecastHourly`, and `observationStations` URLs. The nearest station in the returned official station list supplies current conditions and its human-readable name, station ID, distance, and observation time are displayed. Forecast attribution identifies the configured city point forecast and the NWS issuing office returned by the point metadata.
+
+Tarnov uses the NWS point locality coordinate `41.6147991, -97.5024784`, which resolves to `https://api.weather.gov/gridpoints/OAX/29,77/` and its associated forecast, hourly forecast, and station-list URLs. NWS identifies KOLU (Columbus Municipal Airport) as its nearest listed official observation station at about 23.8 km / 14.8 mi; this is discovered at runtime from the point response rather than hardcoded.
 
 Current wind is explicitly labeled **Sustained Wind**. The app converts the NWS `windSpeed` using its returned `unitCode` (`km/h`, `m/s`, knots, or mph) and only shows a numeric speed for a finite, non-negative recognized measurement. A valid gust is appended only when NWS supplies one that exceeds sustained wind; missing, unknown-unit, or invalid values render as `Unavailable`, not a plausible number.
 
